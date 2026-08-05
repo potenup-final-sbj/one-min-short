@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -24,7 +25,7 @@ class VideoRenderer:
         self.demo_assets = base_dir / "assets" / "demo"
         self.tts_script = base_dir / "scripts" / "tts.ps1"
         self.ffmpeg = self._find_binary("ffmpeg.exe")
-        self.ffprobe = self.ffmpeg.with_name("ffprobe.exe")
+        self.ffprobe = self._find_binary("ffprobe.exe")
         self.font_regular = self._find_font(
             "malgun.ttf", "malgunsl.ttf", "gulim.ttc", "batang.ttc"
         )
@@ -44,20 +45,41 @@ class VideoRenderer:
             matches = sorted(root.glob(f"Gyan.FFmpeg_*/ffmpeg-*/bin/{name}"), reverse=True)
             if matches:
                 return matches[0]
-        raise RuntimeError("FFmpeg를 찾을 수 없습니다. winget install Gyan.FFmpeg를 실행하세요.")
+        raise RuntimeError(
+            "FFmpeg를 찾을 수 없습니다. Windows에서는 'winget install Gyan.FFmpeg', "
+            "Ubuntu/Debian에서는 'sudo apt install ffmpeg'를 실행하세요."
+        )
 
     @staticmethod
     def _find_font(*names: str) -> Path:
-        fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
-        for name in names:
-            font = fonts_dir / name
+        candidates: list[Path] = []
+        if os.name == "nt":
+            fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+            candidates.extend(fonts_dir / name for name in names)
+        else:
+            prefer_bold = any("bold" in name.lower() or "bd" in name.lower() for name in names)
+            regular_fonts = (
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansKR-Regular.ttf",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            )
+            bold_fonts = (
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                "/usr/share/fonts/truetype/noto/NotoSansKR-Bold.ttf",
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            )
+            candidates.extend(
+                Path(path)
+                for path in ((bold_fonts + regular_fonts) if prefer_bold else (regular_fonts + bold_fonts))
+            )
+        for font in candidates:
             if font.is_file():
                 return font
-        searched = ", ".join(names)
+        searched = ", ".join(str(path) for path in candidates)
         raise RuntimeError(
             "사용 가능한 한글 폰트를 찾을 수 없습니다. "
-            f"Windows 한국어 추가 글꼴을 설치하세요. 검색 위치: {fonts_dir} "
-            f"(파일: {searched})"
+            "Windows 한국어 추가 글꼴 또는 Linux fonts-noto-cjk를 설치하세요. "
+            f"검색 파일: {searched}"
         )
 
     def render(self, project_id: str, story: dict) -> dict:
@@ -91,7 +113,8 @@ class VideoRenderer:
             render_duration = scene["duration"]
             image_path = scenes_dir / f"{scene['id']}.png"
             text_path = audio_dir / f"{scene['id']}.txt"
-            audio_path = audio_dir / f"{scene['id']}.wav"
+            audio_suffix = ".wav" if os.name == "nt" else ".mp3"
+            audio_path = audio_dir / f"{scene['id']}{audio_suffix}"
             raw_video_path = cloud_dir / f"{scene['id']}.mp4"
             overlay_path = overlay_dir / f"{scene['id']}.png"
             clip_path = clips_dir / f"{scene['id']}.mp4"
@@ -308,15 +331,26 @@ class VideoRenderer:
         overlay.save(output)
 
     def _synthesize(self, text_path: Path, output: Path, speaker: str) -> None:
-        rate = -1 if speaker == "내레이션" else 0
-        command = [
-            "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-            "-File", str(self.tts_script),
-            "-TextPath", str(text_path),
-            "-OutputPath", str(output),
-            "-VoiceName", "Microsoft Heami Desktop",
-            "-Rate", str(rate),
-        ]
+        if os.name == "nt":
+            rate = -1 if speaker == "내레이션" else 0
+            command = [
+                "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(self.tts_script),
+                "-TextPath", str(text_path),
+                "-OutputPath", str(output),
+                "-VoiceName", "Microsoft Heami Desktop",
+                "-Rate", str(rate),
+            ]
+        else:
+            voice = "ko-KR-InJoonNeural" if speaker == "도현" else "ko-KR-SunHiNeural"
+            rate = "-5%" if speaker == "내레이션" else "+0%"
+            command = [
+                sys.executable, "-m", "edge_tts",
+                "--voice", voice,
+                f"--rate={rate}",
+                "--file", str(text_path),
+                "--write-media", str(output),
+            ]
         self._run(command)
 
     def _render_clip(self, image: Path, audio: Path, output: Path, duration: int) -> None:
