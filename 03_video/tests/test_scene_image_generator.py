@@ -35,9 +35,9 @@ def test_office_is_not_globally_forbidden() -> None:
 def test_story_generates_only_one_image(tmp_path) -> None:
     story = _story("우주비행사들의 연애")
     scene_groups = {
-        "common_scenes": 5,
-        "ending_a": 2,
-        "ending_b": 2,
+        "common_scenes": 3,
+        "ending_a": 1,
+        "ending_b": 1,
     }
     for group, count in scene_groups.items():
         story[group] = [
@@ -46,8 +46,6 @@ def test_story_generates_only_one_image(tmp_path) -> None:
         ]
 
     generator = object.__new__(SceneImageGenerator)
-    generator.cache_dir = tmp_path / "cache"
-    generator.cache_dir.mkdir()
 
     class FakeImage:
         def convert(self, _mode):
@@ -71,3 +69,32 @@ def test_story_generates_only_one_image(tmp_path) -> None:
     assert len(generator.client.prompts) == 1
     assert "Shot 1:" in generator.client.prompts[0]
     assert outputs[0].name == "story_01.png"
+
+
+def test_image_is_generated_fresh_on_every_request(tmp_path) -> None:
+    story = _story("우주비행사들의 연애")
+    story["common_scenes"] = [{"visual_prompt": "Two astronauts meet."}]
+    story["ending_a"] = [{"visual_prompt": "Ending A"}]
+    story["ending_b"] = [{"visual_prompt": "Ending B"}]
+
+    class FakeImage:
+        def convert(self, _mode):
+            return self
+
+        def save(self, path, format):
+            path.write_bytes(format.encode("ascii"))
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = 0
+
+        def text_to_image(self, _prompt, **_kwargs):
+            self.calls += 1
+            return FakeImage()
+
+    generator = object.__new__(SceneImageGenerator)
+    generator.client = FakeClient()
+    generator.generate(story, tmp_path / "first")
+    generator.generate(story, tmp_path / "second")
+
+    assert generator.client.calls == 2

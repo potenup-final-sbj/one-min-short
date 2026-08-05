@@ -14,7 +14,7 @@
 
 별도의 fal.ai 키는 사용하지 않고 Hugging Face 토큰과 자동 Provider 라우팅을 사용합니다. Hugging Face 무료 계정은 ZeroGPU를 하루 5분까지 사용할 수 있으며 대기열이 생길 수 있습니다. 무료 할당량에 맞추기 위해 각 장면은 2초짜리 원본 모션을 만들고, FFmpeg가 대사 길이에 맞춰 반복합니다.
 
-프롬프트별 이미지 1장은 `black-forest-labs/FLUX.1-schnell`로 만들고 로컬 캐시에 저장한 뒤 모든 장면에서 공유합니다. Hugging Face Inference Providers 무료 크레딧이 없거나 토큰에 Inference Providers 권한이 없으면 이미지 생성 단계에서 중단됩니다. Wan2.2 ZeroGPU 한도가 찬 경우에는 오래된 데모 영상을 섞지 않고 새로 생성한 이미지에 로컬 카메라 모션을 적용합니다.
+프롬프트별 이미지 1장은 `black-forest-labs/FLUX.1-schnell`로 매번 새로 만들고 모든 장면에서 공유합니다. 이미지 캐시는 재사용하지 않습니다. Hugging Face Inference Providers 무료 크레딧이 없거나 토큰에 Inference Providers 권한이 없으면 이미지 생성 단계에서 중단됩니다. Wan2.2 ZeroGPU 한도가 찬 경우에는 오래된 데모 영상을 섞지 않고 새로 생성한 이미지에 로컬 카메라 모션을 적용합니다.
 
 SVD 모델 캐시와 `scripts/generate_motion_clip.py`는 예비용으로만 보관하며 운영 파이프라인에서는 호출하지 않습니다.
 
