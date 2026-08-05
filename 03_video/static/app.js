@@ -95,7 +95,7 @@ function renderResult(data) {
   player.poster = data.poster;
   player.src = data.videos.common;
   player.load();
-  document.querySelector('#preview-status').textContent = '공통편 40초 · 결말을 선택하세요';
+  document.querySelector('#preview-status').textContent = '공통편 18초 · 결말을 선택하세요';
 
   document.querySelector('#story-title').textContent = data.story.title;
   document.querySelector('#story-logline').textContent = data.story.logline;
@@ -138,7 +138,7 @@ document.querySelector('#replay-common').addEventListener('click', () => {
   choiceOverlay.classList.add('hidden');
   player.src = generated.videos.common;
   player.play();
-  document.querySelector('#preview-status').textContent = '공통편 40초 · 결말을 선택하세요';
+  document.querySelector('#preview-status').textContent = '공통편 18초 · 결말을 선택하세요';
 });
 
 function escapeHtml(value) {

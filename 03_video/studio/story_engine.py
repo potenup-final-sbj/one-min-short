@@ -9,6 +9,7 @@ from huggingface_hub import InferenceClient, get_token
 
 
 STORY_MODEL = "openai/gpt-oss-20b"
+STORY_PROMPT_VERSION = "thirty-second-v1"
 ACCENTS = {
     "로맨스": "#ff4d8d",
     "스릴러": "#8b5cf6",
@@ -41,7 +42,7 @@ def _extract_json(value: str) -> dict:
 
 
 def _validate_scenes(story: dict, accent: str) -> dict:
-    groups = (("common_scenes", "common", 5, 8), ("ending_a", "ending_a", 2, 10), ("ending_b", "ending_b", 2, 10))
+    groups = (("common_scenes", "common", 3, 6), ("ending_a", "ending_a", 1, 12), ("ending_b", "ending_b", 1, 12))
     required = {
         "title", "location", "speaker", "dialogue", "visual_prompt", "motion_prompt"
     }
@@ -76,7 +77,7 @@ def create_story(prompt: str, genre: str, mood: str) -> dict:
     cache_dir = Path(__file__).resolve().parents[1] / "outputs" / "story_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_key = hashlib.sha256(
-        f"{STORY_MODEL}\n{prompt}\n{genre}\n{mood}".encode("utf-8")
+        f"{STORY_PROMPT_VERSION}\n{STORY_MODEL}\n{prompt}\n{genre}\n{mood}".encode("utf-8")
     ).hexdigest()[:24]
     cache_path = cache_dir / f"{cache_key}.json"
     if cache_path.is_file():
@@ -99,11 +100,11 @@ def create_story(prompt: str, genre: str, mood: str) -> dict:
                 "motion_prompt": "English I2V character action and camera direction",
             }
         ],
-        "ending_a": "same scene object format, exactly 2 scenes",
-        "ending_b": "same scene object format, exactly 2 scenes",
+        "ending_a": "same scene object format, exactly 1 scene",
+        "ending_b": "same scene object format, exactly 1 scene",
     }
     instruction = f"""
-Create a complete 60-second Korean vertical short-drama storyboard from the user's premise.
+Create a complete 30-second Korean vertical short-drama storyboard from the user's premise.
 
 USER PREMISE: {prompt}
 GENRE: {genre}
@@ -113,8 +114,8 @@ Return only one valid JSON object matching this shape:
 {json.dumps(schema, ensure_ascii=False, indent=2)}
 
 Rules:
-- Write exactly 5 common_scenes, exactly 2 ending_a scenes, and exactly 2 ending_b scenes.
-- Common scenes form a coherent 40-second story. Each ending is an alternative 20-second conclusion.
+- Write exactly 3 common_scenes scenes, exactly 1 ending_a scene, and exactly 1 ending_b scene.
+- The three common scenes last 6 seconds each. Each alternative ending lasts 12 seconds.
 - Every character, location, event, line, visual_prompt, and motion_prompt must derive from USER PREMISE.
 - Do not introduce offices, company CEOs, former lovers, or an eight-year separation unless USER PREMISE explicitly asks for them.
 - Keep the same protagonist appearance and wardrobe across all English visual prompts by following visual_bible.
@@ -152,7 +153,7 @@ Rules:
     story["logline"] = prompt
     story["genre"] = genre
     story["mood"] = mood
-    story["duration"] = {"common": 40, "ending": 20, "total": 60}
+    story["duration"] = {"common": 18, "ending": 12, "total": 30}
     story = _validate_scenes(story, ACCENTS.get(genre, "#ff4d8d"))
     cache_path.write_text(
         json.dumps(story, ensure_ascii=False, indent=2), encoding="utf-8"
