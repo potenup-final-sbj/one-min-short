@@ -23,7 +23,6 @@ class VideoRenderer:
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
         self.output_root = base_dir / "outputs"
-        self.demo_assets = base_dir / "assets" / "demo"
         self.tts_script = base_dir / "scripts" / "tts.ps1"
         self.ffmpeg = self._find_binary("ffmpeg.exe")
         self.ffprobe = self._find_binary("ffprobe.exe")
@@ -100,21 +99,12 @@ class VideoRenderer:
             story, generated_images_dir
         )
 
-        # Keep all nine story beats, but spend ZeroGPU time on only three hero
-        # shots. The other beats use distinct stills with local camera motion.
-        # This preserves the 40-second shared story and both 20-second endings
-        # without looping one Wan clip for an entire section.
         common_scenes = story["common_scenes"]
         ending_a_scenes = story["ending_a"]
         ending_b_scenes = story["ending_b"]
         all_scenes = common_scenes + ending_a_scenes + ending_b_scenes
         for scene in all_scenes:
-            if scene["id"] in {"common_01", "common_02"}:
-                scene["image_path"] = str(story_images[0])
-            elif scene["id"] in {"common_03", "common_04"}:
-                scene["image_path"] = str(story_images[1])
-            else:
-                scene["image_path"] = str(story_images[2])
+            scene["image_path"] = str(story_images[0])
         wan_scene_ids = {
             common_scenes[0]["id"],
             ending_a_scenes[-1]["id"],
@@ -139,7 +129,15 @@ class VideoRenderer:
                 overlay_path, story, scene, index, len(all_scenes)
             )
             text_path.write_text(scene["dialogue"], encoding="utf-8")
-            self._synthesize(text_path, audio_path, scene["speaker"])
+            voice_style = next(
+                (
+                    str(character.get("voice", "female"))
+                    for character in story["characters"]
+                    if character.get("name") == scene["speaker"]
+                ),
+                "female",
+            )
+            self._synthesize(text_path, audio_path, scene["speaker"], voice_style)
             if scene["id"] in wan_scene_ids:
                 input_image = self._input_image_for_scene(scene)
                 generation_prompt = self._generation_prompt(story, scene)
@@ -247,7 +245,7 @@ class VideoRenderer:
             if not candidate.is_file():
                 raise RuntimeError(f"장면 입력 이미지를 찾을 수 없습니다: {candidate}")
             return candidate
-        return self._background_for_scene(scene["id"])
+        raise RuntimeError(f"장면 이미지 경로가 설정되지 않았습니다: {scene['id']}")
 
     def _font(self, size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
         return ImageFont.truetype(str(self.font_bold if bold else self.font_regular), size)
@@ -308,19 +306,6 @@ class VideoRenderer:
         draw.text((44, 1230), story["title"], font=self._font(17), fill=(220, 222, 230, 190))
         image.convert("RGB").save(output, quality=95)
 
-    def _background_for_scene(self, scene_id: str) -> Path:
-        if scene_id in {"common_01", "common_02"}:
-            filename = "scene-01-first-day.png"
-        elif scene_id in {"common_03", "common_04"}:
-            filename = "scene-02-reveal.png"
-        else:
-            filename = "scene-03-confrontation.png"
-
-        path = self.demo_assets / filename
-        if not path.exists():
-            raise RuntimeError(f"드라마 장면 이미지를 찾을 수 없습니다: {path}")
-        return path
-
     def _draw_subtitle_overlay(
         self,
         output: Path,
@@ -357,7 +342,9 @@ class VideoRenderer:
         draw.text((44, 1230), story["title"], font=self._font(17), fill=(220, 222, 230, 190))
         overlay.save(output)
 
-    def _synthesize(self, text_path: Path, output: Path, speaker: str) -> None:
+    def _synthesize(
+        self, text_path: Path, output: Path, speaker: str, voice_style: str = "female"
+    ) -> None:
         if os.name == "nt":
             rate = -1 if speaker == "내레이션" else 0
             command = [
@@ -369,7 +356,11 @@ class VideoRenderer:
                 "-Rate", str(rate),
             ]
         else:
-            voice = "ko-KR-InJoonNeural" if speaker == "도현" else "ko-KR-SunHiNeural"
+            voice = (
+                "ko-KR-InJoonNeural"
+                if voice_style.lower() == "male"
+                else "ko-KR-SunHiNeural"
+            )
             rate = "-5%" if speaker == "내레이션" else "+0%"
             command = [
                 sys.executable, "-m", "edge_tts",

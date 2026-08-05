@@ -8,7 +8,7 @@ from huggingface_hub import InferenceClient, get_token
 
 
 IMAGE_MODEL = "black-forest-labs/FLUX.1-schnell"
-PROMPT_MODEL = "openai/gpt-oss-20b"
+IMAGE_PROMPT_VERSION = "premise-grounded-v4-single-image"
 
 
 class SceneImageGenerationError(RuntimeError):
@@ -16,7 +16,7 @@ class SceneImageGenerationError(RuntimeError):
 
 
 class SceneImageGenerator:
-    """Generate and cache three prompt-grounded vertical drama stills."""
+    """Generate and cache one prompt-grounded still for the whole story."""
 
     def __init__(self, base_dir: Path):
         token = get_token()
@@ -28,109 +28,64 @@ class SceneImageGenerator:
         self.cache_dir = base_dir / "outputs" / "image_cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _translated_premise(self, story: dict) -> str:
-        source = story["logline"].strip()
-        cache_key = hashlib.sha256(
-            f"{PROMPT_MODEL}\n{source}".encode("utf-8")
-        ).hexdigest()[:24]
-        cache_path = self.cache_dir / f"prompt_{cache_key}.txt"
-        if cache_path.is_file():
-            return cache_path.read_text(encoding="utf-8").strip()
-
-        try:
-            response = self.client.chat_completion(
-                model=PROMPT_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Translate the user's Korean story premise into a literal, "
-                            "visually specific English description for an image model. "
-                            "Preserve the exact characters, setting, relationship, era, "
-                            "and central event. Output only the English translation."
-                        ),
-                    },
-                    {"role": "user", "content": source},
-                ],
-                max_tokens=600,
-                temperature=0,
-            )
-            translated = (response.choices[0].message.content or "").strip()
-        except Exception as exc:
-            raise SceneImageGenerationError(
-                f"한국어 소재를 이미지 프롬프트로 변환하지 못했습니다: {exc}"
-            ) from exc
-        if not translated:
-            raise SceneImageGenerationError("이미지 프롬프트 변환 결과가 비어 있습니다.")
-        cache_path.write_text(translated, encoding="utf-8")
-        return translated
-
     @staticmethod
-    def _prompt(story: dict, translated_premise: str, shot_number: int) -> str:
-        shot_directions = {
-            1: (
-                "Establish the characters and environment described by the premise. "
-                "A visually clear opening moment that immediately communicates the setting."
-            ),
-            2: (
-                "Show the central relationship and conflict from the premise developing. "
-                "Medium cinematic shot, meaningful eye contact and dramatic tension."
-            ),
-            3: (
-                "Show the emotional climax and a decisive confrontation implied by the premise. "
-                "Intimate cinematic composition with strong but natural emotion."
-            ),
-        }
-        return "\n".join(
-            (
+    def _prompt(story: dict, scene: dict, shot_number: int) -> str:
+        premise = str(story["logline"]).strip()
+        prompt_parts = [
                 "Vertical 9:16 cinematic live-action Korean short drama still.",
-                f"Story premise: {translated_premise}",
+                f"The user's exact story premise is: {premise}",
+                (
+                    "Depict that premise and this scene literally. The location must "
+                    "match the described story world; do not substitute a generic setting."
+                ),
+                f"Character and setting continuity: {story['visual_bible']}",
                 f"Genre: {story['genre']}. Mood: {story['mood']}.",
-                f"Shot {shot_number}: {shot_directions[shot_number]}",
+                f"Shot {shot_number}: {scene['visual_prompt']}",
                 (
                     "Photorealistic people and environment, coherent production design, "
                     "natural anatomy, expressive faces, cinematic lighting, shallow depth "
                     "of field, no text, no subtitles, no logo, no watermark."
                 ),
-            )
-        )
+        ]
+        return "\n".join(prompt_parts)
+
+    @staticmethod
+    def _negative_prompt() -> str:
+        return "text, subtitles, logo, watermark, malformed anatomy, generic stock photo"
 
     def generate(self, story: dict, output_dir: Path) -> list[Path]:
         output_dir.mkdir(parents=True, exist_ok=True)
-        outputs: list[Path] = []
-        translated_premise = self._translated_premise(story)
+        scene = story["common_scenes"][0]
+        prompt = self._prompt(story, scene, 1)
+        seed = 3101
+        cache_key = hashlib.sha256(
+            (
+                f"{IMAGE_PROMPT_VERSION}\n{IMAGE_MODEL}\n{prompt}\n"
+                f"negative={self._negative_prompt()}\nseed={seed}"
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+        cache_path = self.cache_dir / f"{cache_key}.png"
+        output_path = output_dir / "story_01.png"
 
-        for index in range(1, 4):
-            prompt = self._prompt(story, translated_premise, index)
-            cache_key = hashlib.sha256(
-                f"{IMAGE_MODEL}\n{prompt}\nseed={3100 + index}".encode("utf-8")
-            ).hexdigest()[:24]
-            cache_path = self.cache_dir / f"{cache_key}.png"
-            output_path = output_dir / f"story_{index:02}.png"
-
-            if cache_path.is_file():
-                shutil.copy2(cache_path, output_path)
-                outputs.append(output_path)
-                continue
-
+        if not cache_path.is_file():
             try:
                 image = self.client.text_to_image(
                     prompt,
+                    negative_prompt=self._negative_prompt(),
                     model=IMAGE_MODEL,
                     width=768,
                     height=1344,
                     num_inference_steps=4,
                     guidance_scale=3.5,
-                    seed=3100 + index,
+                    seed=seed,
                 )
             except Exception as exc:
                 raise SceneImageGenerationError(
-                    "프롬프트별 장면 이미지 생성에 실패했습니다. Hugging Face "
+                    "프롬프트 이미지 생성에 실패했습니다. Hugging Face "
                     f"Inference Providers 권한·무료 크레딧을 확인하세요: {exc}"
                 ) from exc
 
             image.convert("RGB").save(cache_path, format="PNG")
-            shutil.copy2(cache_path, output_path)
-            outputs.append(output_path)
 
-        return outputs
+        shutil.copy2(cache_path, output_path)
+        return [output_path]

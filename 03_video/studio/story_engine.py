@@ -1,138 +1,160 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+from pathlib import Path
+
+from huggingface_hub import InferenceClient, get_token
 
 
-GENRE_STYLES = {
-    "로맨스": {"accent": "#ff4d8d", "location": "도심 오피스"},
-    "스릴러": {"accent": "#8b5cf6", "location": "불 꺼진 사무실"},
-    "코미디": {"accent": "#ffb703", "location": "활기찬 스타트업"},
-    "판타지": {"accent": "#22d3ee", "location": "시간이 멈춘 빌딩"},
+STORY_MODEL = "openai/gpt-oss-20b"
+ACCENTS = {
+    "로맨스": "#ff4d8d",
+    "스릴러": "#8b5cf6",
+    "코미디": "#ffb703",
+    "판타지": "#22d3ee",
 }
 
 
-def _title_from_prompt(prompt: str) -> str:
-    cleaned = re.sub(r"[.!?。]+$", "", prompt.strip())
-    return cleaned if len(cleaned) <= 28 else cleaned[:27].rstrip() + "…"
+class StoryGenerationError(RuntimeError):
+    pass
 
 
-def _scene(
-    scene_id: str,
-    phase: str,
-    title: str,
-    location: str,
-    speaker: str,
-    dialogue: str,
-    visual: str,
-    motion_prompt: str,
-    duration: int,
-    accent: str,
-) -> dict:
-    return {
-        "id": scene_id,
-        "phase": phase,
-        "title": title,
-        "location": location,
-        "speaker": speaker,
-        "dialogue": dialogue,
-        "subtitle": dialogue,
-        "visual_prompt": visual,
-        "motion_prompt": motion_prompt,
-        "duration": duration,
-        "accent": accent,
+def _extract_json(value: str) -> dict:
+    text = value.strip()
+    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1)
+    else:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise StoryGenerationError(f"스토리 JSON을 해석하지 못했습니다: {exc}") from exc
+    if not isinstance(result, dict):
+        raise StoryGenerationError("스토리 생성 결과가 JSON 객체가 아닙니다.")
+    return result
+
+
+def _validate_scenes(story: dict, accent: str) -> dict:
+    groups = (("common_scenes", "common", 5, 8), ("ending_a", "ending_a", 2, 10), ("ending_b", "ending_b", 2, 10))
+    required = {
+        "title", "location", "speaker", "dialogue", "visual_prompt", "motion_prompt"
     }
+    for group_name, phase, expected_count, duration in groups:
+        scenes = story.get(group_name)
+        if not isinstance(scenes, list) or len(scenes) != expected_count:
+            raise StoryGenerationError(
+                f"{group_name} 장면 수가 {expected_count}개가 아닙니다."
+            )
+        for index, scene in enumerate(scenes, start=1):
+            if not isinstance(scene, dict) or not required.issubset(scene):
+                raise StoryGenerationError(f"{group_name} {index}번 장면 필드가 부족합니다.")
+            scene["id"] = f"{phase}_{index:02}"
+            scene["phase"] = phase
+            scene["subtitle"] = str(scene["dialogue"])
+            scene["duration"] = duration
+            scene["accent"] = accent
+    if not isinstance(story.get("characters"), list) or not story["characters"]:
+        raise StoryGenerationError("등장인물 정보가 없습니다.")
+    if not isinstance(story.get("visual_bible"), str) or not story["visual_bible"].strip():
+        raise StoryGenerationError("캐릭터·배경 비주얼 바이블이 없습니다.")
+    return story
 
 
 def create_story(prompt: str, genre: str, mood: str) -> dict:
-    style = GENRE_STYLES.get(genre, GENRE_STYLES["로맨스"])
-    accent = style["accent"]
-    location = style["location"]
-    title = _title_from_prompt(prompt)
+    token = get_token()
+    if not token:
+        raise StoryGenerationError(
+            "Hugging Face 로그인이 필요합니다. `hf auth login`을 먼저 실행하세요."
+        )
 
-    common = [
-        _scene(
-            "common_01", "common", "모든 것이 시작된 날", location,
-            "내레이션", f"{prompt}. 모든 것은 바로 그날 시작됐다.",
-            f"{mood} 분위기, 세로형 드라마 오프닝, {location}",
-            "The woman takes a slow breath and looks around the office. Her hair and blazer move naturally. Coworkers work softly in the background. Slow cinematic push-in.",
-            8, accent,
-        ),
-        _scene(
-            "common_02", "common", "낯선 신호", location,
-            "서윤", "설마… 이게 정말 우연이라고? 심장이 왜 이렇게 뛰지?",
-            "놀란 주인공의 클로즈업, 흔들리는 눈빛",
-            "She slowly raises her gaze, blinks, and freezes in recognition. Her expression changes from calm to shocked. Subtle handheld camera movement.",
-            8, accent,
-        ),
-        _scene(
-            "common_03", "common", "피할 수 없는 대면", location,
-            "도현", "오랜만이네. 나한테 정말 아무 말도 없었어?",
-            "차가운 표정의 상대역, 역광, 긴장감 있는 재회",
-            "The man walks into the office, then turns his head toward the woman. They lock eyes. Employees applaud naturally behind them. Slow camera dolly forward.",
-            8, accent,
-        ),
-        _scene(
-            "common_04", "common", "숨겨진 관계", location,
-            "민지", "잠깐만요. 두 사람… 원래 아는 사이예요?",
-            "세 사람 사이의 불편한 침묵, 시선 교차",
-            "The two leads remain tense while a coworker glances between them in confusion. Natural blinking and breathing. The camera gently shifts focus between their faces.",
-            8, accent,
-        ),
-        _scene(
-            "common_05", "common", "당신의 선택은?", "선택의 순간",
-            "내레이션", "모른 척 외면할까, 아니면 그날의 진실을 물을까?",
-            "시간이 멈춘 듯한 주인공, 두 갈래 선택",
-            "The woman hesitates and looks away, then slowly turns back toward the man. The camera circles subtly as the office background falls out of focus.",
-            8, "#f43f5e",
-        ),
-    ]
+    cache_dir = Path(__file__).resolve().parents[1] / "outputs" / "story_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key = hashlib.sha256(
+        f"{STORY_MODEL}\n{prompt}\n{genre}\n{mood}".encode("utf-8")
+    ).hexdigest()[:24]
+    cache_path = cache_dir / f"{cache_key}.json"
+    if cache_path.is_file():
+        return json.loads(cache_path.read_text(encoding="utf-8"))
 
-    ending_a = [
-        _scene(
-            "ending_a_01", "ending_a", "A. 모른 척한다", location,
-            "서윤", "죄송하지만… 저희 오늘 처음 뵙는 사이 아닌가요?",
-            "감정을 숨기고 돌아서는 주인공",
-            "She hides her emotion, gives a restrained professional nod, and slowly turns away. The man watches without moving. Smooth cinematic tracking shot.",
-            10, "#3b82f6",
-        ),
-        _scene(
-            "ending_a_02", "ending_a", "끝나지 않은 기억", "대표실 앞",
-            "도현", "그래, 그렇게 하자. 하지만 네가 먼저 날 찾아오게 될 거야.",
-            "의미심장하게 미소 짓는 상대역, 다음 화 예고",
-            "The man watches her leave, lowers his eyes briefly, then gives a subtle knowing smile. Slow close-up with natural facial movement.",
-            10, "#3b82f6",
-        ),
-    ]
-
-    ending_b = [
-        _scene(
-            "ending_b_01", "ending_b", "B. 진실을 묻는다", location,
-            "서윤", "8년 전, 왜 아무 말도 없이 사라졌어? 지금 대답해.",
-            "눈물을 참으며 정면으로 맞서는 주인공",
-            "She steps closer and confronts him, eyes trembling with restrained tears. He stiffens and meets her gaze. Slow dramatic push-in.",
-            10, "#f59e0b",
-        ),
-        _scene(
-            "ending_b_02", "ending_b", "충격적인 대답", "조용한 복도",
-            "도현", "너를 버린 게 아니야. 그날, 너를 지키려면 사라져야 했어.",
-            "숨겨진 비밀을 암시하는 상대역, 다음 화 예고",
-            "He exhales, looks down with regret, then quietly reveals the truth while meeting her eyes. She reacts in shock. Intimate cinematic close-up.",
-            10, "#f59e0b",
-        ),
-    ]
-
-    return {
-        "title": title,
-        "logline": prompt,
-        "genre": genre,
-        "mood": mood,
+    schema = {
+        "title": "Korean title, no more than 28 characters",
+        "logline": "the exact user premise in Korean",
+        "visual_bible": "English description of recurring characters, wardrobe, era, and setting for image consistency",
         "characters": [
-            {"name": "서윤", "role": "주인공", "voice": "Microsoft Heami Desktop"},
-            {"name": "도현", "role": "비밀을 가진 상대역", "voice": "Microsoft Heami Desktop"},
-            {"name": "민지", "role": "진실을 목격하는 동료", "voice": "Microsoft Heami Desktop"},
+            {"name": "Korean name", "role": "Korean role", "voice": "female or male"}
         ],
-        "common_scenes": common,
-        "ending_a": ending_a,
-        "ending_b": ending_b,
-        "duration": {"common": 40, "ending": 20, "total": 60},
+        "common_scenes": [
+            {
+                "title": "Korean scene title",
+                "location": "Korean location",
+                "speaker": "character name or 내레이션",
+                "dialogue": "natural Korean narration or dialogue",
+                "visual_prompt": "English cinematic still description grounded in the user premise",
+                "motion_prompt": "English I2V character action and camera direction",
+            }
+        ],
+        "ending_a": "same scene object format, exactly 2 scenes",
+        "ending_b": "same scene object format, exactly 2 scenes",
     }
+    instruction = f"""
+Create a complete 60-second Korean vertical short-drama storyboard from the user's premise.
+
+USER PREMISE: {prompt}
+GENRE: {genre}
+MOOD: {mood}
+
+Return only one valid JSON object matching this shape:
+{json.dumps(schema, ensure_ascii=False, indent=2)}
+
+Rules:
+- Write exactly 5 common_scenes, exactly 2 ending_a scenes, and exactly 2 ending_b scenes.
+- Common scenes form a coherent 40-second story. Each ending is an alternative 20-second conclusion.
+- Every character, location, event, line, visual_prompt, and motion_prompt must derive from USER PREMISE.
+- Do not introduce offices, company CEOs, former lovers, or an eight-year separation unless USER PREMISE explicitly asks for them.
+- Keep the same protagonist appearance and wardrobe across all English visual prompts by following visual_bible.
+- visual_prompt must describe the exact visible setting, characters, wardrobe, composition, lighting, and emotion.
+- motion_prompt must describe actions visible from the still plus restrained camera movement suitable for image-to-video.
+- Korean dialogue must be concise enough to speak within each scene.
+- ending_a and ending_b must be meaningfully different choices.
+- Do not include IDs, phase, duration, subtitle, or accent; the application adds them.
+""".strip()
+
+    client = InferenceClient(provider="auto", api_key=token, timeout=180)
+    try:
+        response = client.chat_completion(
+            model=STORY_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Korean screenwriter and storyboard director. "
+                        "Follow the requested JSON format exactly."
+                    ),
+                },
+                {"role": "user", "content": instruction},
+            ],
+            max_tokens=5000,
+            temperature=0.45,
+        )
+        content = response.choices[0].message.content or ""
+    except Exception as exc:
+        raise StoryGenerationError(f"대본 생성 API 호출에 실패했습니다: {exc}") from exc
+    if not content.strip():
+        raise StoryGenerationError("대본 생성 결과가 비어 있습니다.")
+
+    story = _extract_json(content)
+    story["logline"] = prompt
+    story["genre"] = genre
+    story["mood"] = mood
+    story["duration"] = {"common": 40, "ending": 20, "total": 60}
+    story = _validate_scenes(story, ACCENTS.get(genre, "#ff4d8d"))
+    cache_path.write_text(
+        json.dumps(story, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return story
