@@ -19,6 +19,10 @@ class Wan22ConfigurationError(RuntimeError):
     pass
 
 
+class Wan22QuotaProtected(RuntimeError):
+    pass
+
+
 class Wan22CloudClient:
     """Free Hugging Face ZeroGPU client for Wan2.2 Image-to-Video."""
 
@@ -99,26 +103,10 @@ class Wan22CloudClient:
 
         recent = self._recent_generations()
         if len(recent) >= MAX_GENERATIONS_PER_24_HOURS:
-            fallback = self._fallback_video(output_path.name)
-            if fallback is None:
-                raise RuntimeError(
-                    "Wan2.2 무료 사용 보호 한도에 도달했고 재사용할 캐시 영상이 없습니다."
-                )
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(fallback, output_path)
-            self.log(
-                f"무료 사용 보호: 최근 24시간 {len(recent)}회 생성, "
-                f"기존 캐시 반환 ({fallback.name})"
+            raise Wan22QuotaProtected(
+                f"무료 사용 보호: 최근 24시간 {len(recent)}회 생성. "
+                "프롬프트 이미지에 로컬 모션을 적용합니다."
             )
-            return {
-                "provider": "local Wan2.2 quota fallback",
-                "space": WAN22_SPACE,
-                "seed": seed,
-                "prompt": motion_prompt,
-                "cached": True,
-                "quota_fallback": True,
-                "recent_generations": len(recent),
-            }
 
         self.log(f"HF ZeroGPU Wan2.2 대기열 등록: {image_path.name}")
         client = Client(WAN22_SPACE, token=self.token, verbose=False)

@@ -47,6 +47,7 @@ def health() -> dict:
         "ffmpeg": str(renderer.ffmpeg),
         "tts": "Windows SAPI",
         "video_provider": f"Hugging Face ZeroGPU: {WAN22_SPACE}",
+        "image_provider": "Hugging Face Inference Providers: FLUX.1-schnell",
         "wan22_configured": bool(get_token()),
         "billing": "free daily quota",
     }

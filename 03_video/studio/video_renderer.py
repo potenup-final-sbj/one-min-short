@@ -10,7 +10,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
-from studio.wan22_cloud import Wan22CloudClient
+from studio.scene_image_generator import SceneImageGenerator
+from studio.wan22_cloud import Wan22CloudClient, Wan22QuotaProtected
 
 
 WIDTH = 720
@@ -89,8 +90,15 @@ class VideoRenderer:
         clips_dir = project_dir / "clips"
         cloud_dir = project_dir / "wan22"
         overlay_dir = project_dir / "overlays"
-        for directory in (scenes_dir, audio_dir, clips_dir, cloud_dir, overlay_dir):
+        generated_images_dir = project_dir / "generated_images"
+        for directory in (
+            scenes_dir, audio_dir, clips_dir, cloud_dir, overlay_dir, generated_images_dir
+        ):
             directory.mkdir(parents=True, exist_ok=True)
+
+        story_images = SceneImageGenerator(self.base_dir).generate(
+            story, generated_images_dir
+        )
 
         # Keep all nine story beats, but spend ZeroGPU time on only three hero
         # shots. The other beats use distinct stills with local camera motion.
@@ -100,6 +108,13 @@ class VideoRenderer:
         ending_a_scenes = story["ending_a"]
         ending_b_scenes = story["ending_b"]
         all_scenes = common_scenes + ending_a_scenes + ending_b_scenes
+        for scene in all_scenes:
+            if scene["id"] in {"common_01", "common_02"}:
+                scene["image_path"] = str(story_images[0])
+            elif scene["id"] in {"common_03", "common_04"}:
+                scene["image_path"] = str(story_images[1])
+            else:
+                scene["image_path"] = str(story_images[2])
         wan_scene_ids = {
             common_scenes[0]["id"],
             ending_a_scenes[-1]["id"],
@@ -128,20 +143,32 @@ class VideoRenderer:
             if scene["id"] in wan_scene_ids:
                 input_image = self._input_image_for_scene(scene)
                 generation_prompt = self._generation_prompt(story, scene)
-                cloud_jobs[scene["id"]] = cloud_client.generate(
-                    input_image,
-                    generation_prompt,
-                    raw_video_path,
-                    seed=2100 + index,
-                )
-                cloud_jobs[scene["id"]]["render_duration"] = render_duration
-                self._render_cloud_clip(
-                    raw_video_path,
-                    audio_path,
-                    overlay_path,
-                    clip_path,
-                    render_duration,
-                )
+                try:
+                    cloud_jobs[scene["id"]] = cloud_client.generate(
+                        input_image,
+                        generation_prompt,
+                        raw_video_path,
+                        seed=2100 + index,
+                    )
+                except Wan22QuotaProtected as exc:
+                    cloud_jobs[scene["id"]] = {
+                        "provider": "local animated generated image",
+                        "cached": True,
+                        "quota_fallback": True,
+                        "detail": str(exc),
+                    }
+                    self._render_clip(
+                        image_path, audio_path, clip_path, render_duration
+                    )
+                else:
+                    cloud_jobs[scene["id"]]["render_duration"] = render_duration
+                    self._render_cloud_clip(
+                        raw_video_path,
+                        audio_path,
+                        overlay_path,
+                        clip_path,
+                        render_duration,
+                    )
             else:
                 cloud_jobs[scene["id"]] = {
                     "provider": "local animated still",
@@ -239,7 +266,7 @@ class VideoRenderer:
         total: int,
     ) -> None:
         accent = self._hex(scene["accent"])
-        background = self._background_for_scene(scene["id"])
+        background = self._input_image_for_scene(scene)
         image = ImageOps.fit(
             Image.open(background).convert("RGB"),
             (WIDTH, HEIGHT),
