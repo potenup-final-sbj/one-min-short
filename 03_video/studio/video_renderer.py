@@ -25,8 +25,12 @@ class VideoRenderer:
         self.tts_script = base_dir / "scripts" / "tts.ps1"
         self.ffmpeg = self._find_binary("ffmpeg.exe")
         self.ffprobe = self.ffmpeg.with_name("ffprobe.exe")
-        self.font_regular = self._find_font("malgun.ttf")
-        self.font_bold = self._find_font("malgunbd.ttf")
+        self.font_regular = self._find_font(
+            "malgun.ttf", "malgunsl.ttf", "gulim.ttc", "batang.ttc"
+        )
+        self.font_bold = self._find_font(
+            "malgunbd.ttf", "malgun.ttf", "gulim.ttc", "batang.ttc"
+        )
 
     @staticmethod
     def _find_binary(name: str) -> Path:
@@ -43,11 +47,18 @@ class VideoRenderer:
         raise RuntimeError("FFmpeg를 찾을 수 없습니다. winget install Gyan.FFmpeg를 실행하세요.")
 
     @staticmethod
-    def _find_font(name: str) -> Path:
-        font = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / name
-        if not font.exists():
-            raise RuntimeError(f"필요한 한글 폰트를 찾을 수 없습니다: {font}")
-        return font
+    def _find_font(*names: str) -> Path:
+        fonts_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+        for name in names:
+            font = fonts_dir / name
+            if font.is_file():
+                return font
+        searched = ", ".join(names)
+        raise RuntimeError(
+            "사용 가능한 한글 폰트를 찾을 수 없습니다. "
+            f"Windows 한국어 추가 글꼴을 설치하세요. 검색 위치: {fonts_dir} "
+            f"(파일: {searched})"
+        )
 
     def render(self, project_id: str, story: dict) -> dict:
         project_dir = self.output_root / project_id
