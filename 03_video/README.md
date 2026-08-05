@@ -1,6 +1,6 @@
 # AI 숏드라마 스튜디오
 
-한 줄 소재를 입력하면 등장인물·대본·장면을 만들고, 세로형 숏드라마 MP4와 A/B 결말을 생성하는 FastAPI 웹 앱입니다.
+한 줄 소재를 입력하면 등장인물·대본·장면을 만들고, 30초 세로형 숏드라마 MP4와 A/B 결말을 생성하는 FastAPI 웹 앱입니다.
 
 ## 영상 생성 경로
 
@@ -14,7 +14,7 @@
 
 별도의 fal.ai 키는 사용하지 않고 Hugging Face 토큰과 자동 Provider 라우팅을 사용합니다. Hugging Face 무료 계정은 ZeroGPU를 하루 5분까지 사용할 수 있으며 대기열이 생길 수 있습니다. 무료 할당량에 맞추기 위해 각 장면은 2초짜리 원본 모션을 만들고, FFmpeg가 대사 길이에 맞춰 반복합니다.
 
-프롬프트별 이미지 3장은 `black-forest-labs/FLUX.1-schnell`로 만들고 로컬 캐시에 저장합니다. Hugging Face Inference Providers 무료 크레딧이 없거나 토큰에 Inference Providers 권한이 없으면 이미지 생성 단계에서 중단됩니다. Wan2.2 ZeroGPU 한도가 찬 경우에는 오래된 데모 영상을 섞지 않고 새로 생성한 이미지에 로컬 카메라 모션을 적용합니다.
+프롬프트별 이미지 1장은 `black-forest-labs/FLUX.1-schnell`로 매번 새로 만들고 모든 장면에서 공유합니다. 이미지 캐시는 재사용하지 않습니다. Hugging Face Inference Providers 무료 크레딧이 없거나 토큰에 Inference Providers 권한이 없으면 이미지 생성 단계에서 중단됩니다. Wan2.2 ZeroGPU 한도가 찬 경우에는 오래된 데모 영상을 섞지 않고 새로 생성한 이미지에 로컬 카메라 모션을 적용합니다.
 
 SVD 모델 캐시와 `scripts/generate_motion_clip.py`는 예비용으로만 보관하며 운영 파이프라인에서는 호출하지 않습니다.
 
@@ -67,7 +67,7 @@ uv run python -m uvicorn main:app --host 0.0.0.0 --port 8030
 03_video/
 ├─ main.py                       # FastAPI 및 생성 API
 ├─ studio/story_engine.py        # 대본, 장면, A/B 결말
-├─ studio/scene_image_generator.py # 소재 번역 및 FLUX 장면 이미지 3장 생성
+├─ studio/scene_image_generator.py # 소재 번역 및 FLUX 이미지 1장 생성
 ├─ studio/video_renderer.py      # 영상·TTS·자막 합성
 ├─ studio/wan22_cloud.py         # 무료 HF ZeroGPU Wan2.2 클라이언트
 ├─ scripts/tts.ps1               # Windows 한국어 TTS
