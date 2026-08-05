@@ -1,0 +1,6 @@
+.venv/
+.video-venv/
+__pycache__/
+*.py[cod]
+outputs/
+server*.log

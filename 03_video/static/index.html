@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SCENE:60 — AI Short Drama Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+  <div class="grain"></div>
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">60</span>
+      <span>SCENE:60</span>
+    </a>
+    <span class="badge"><i></i> WAN2.2 FREE ZERO GPU</span>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="eyebrow">PROMPT TO SHORT DRAMA</div>
+      <h1>한 줄의 상상이<br><em>60초의 드라마</em>가 됩니다.</h1>
+      <p>소재를 입력하면 대본, 장면, 목소리와 자막을 조합해<br>선택형 세로 숏드라마를 자동으로 완성합니다.</p>
+    </section>
+
+    <section class="studio-grid">
+      <div class="creator-panel panel">
+        <div class="panel-head">
+          <span class="step">01</span>
+          <div><h2>스토리 만들기</h2><p>당신의 드라마는 어떤 이야기인가요?</p></div>
+        </div>
+
+        <form id="generate-form">
+          <label for="prompt">드라마 소재</label>
+          <div class="prompt-wrap">
+            <textarea id="prompt" maxlength="300" required placeholder="예: 폐쇄된 우주정거장에서 정체불명의 구조 신호가 도착했다."></textarea>
+            <span id="char-count">0 / 300</span>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="genre">장르</label>
+              <select id="genre">
+                <option>로맨스</option><option>스릴러</option><option>코미디</option><option>판타지</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="mood">분위기</label>
+              <select id="mood">
+                <option>긴장감 있는</option><option>설레는</option><option>감성적인</option><option>유쾌한</option>
+              </select>
+            </div>
+          </div>
+
+          <button class="generate-button" type="submit">
+            <span class="button-icon">✦</span>
+            <span>60초 드라마 생성</span>
+            <small>무료 · 로컬 렌더링</small>
+          </button>
+        </form>
+
+        <div id="progress" class="progress-card hidden">
+          <div class="progress-copy"><strong id="progress-title">스토리를 구성하고 있어요</strong><span id="progress-percent">12%</span></div>
+          <div class="progress-track"><i id="progress-bar"></i></div>
+          <p id="progress-detail">등장인물과 장면을 설계하는 중…</p>
+        </div>
+
+        <div class="pipeline">
+          <span>STORY</span><i></i><span>VOICE</span><i></i><span>SCENE</span><i></i><span>VIDEO</span>
+        </div>
+      </div>
+
+      <aside class="preview-panel panel">
+        <div class="panel-head compact">
+          <span class="step">02</span>
+          <div><h2>미리보기</h2><p id="preview-status">소재를 입력해 새 드라마를 만드세요</p></div>
+        </div>
+        <div class="phone-shell">
+          <div class="phone-screen" id="phone-screen">
+            <video id="player" playsinline controls style="display:none"></video>
+            <div class="empty-preview" id="empty-preview">
+              <div class="empty-orbit"><span>✦</span></div>
+              <strong>아직 만들어진 장면이 없어요</strong>
+              <p>왼쪽에서 소재를 입력해<br>첫 번째 드라마를 만들어보세요.</p>
+            </div>
+            <div class="choice-overlay hidden" id="choice-overlay">
+              <span>당신의 선택은?</span>
+              <strong>주인공은 어떻게 행동할까요?</strong>
+              <button data-ending="a">A. 첫 번째 결말</button>
+              <button data-ending="b">B. 두 번째 결말</button>
+            </div>
+          </div>
+        </div>
+        <div class="preview-actions hidden" id="preview-actions">
+          <button id="replay-common">공통편 다시 보기</button>
+          <a id="download-a" href="#">결말 A · 60초 MP4</a>
+          <a id="download-b" href="#">결말 B · 60초 MP4</a>
+        </div>
+      </aside>
+    </section>
+
+    <section id="story-result" class="story-result hidden">
+      <div class="result-heading">
+        <div><span class="eyebrow">GENERATED STORYBOARD</span><h2 id="story-title"></h2><p id="story-logline"></p></div>
+        <div class="runtime"><strong>60</strong><span>SECONDS<br>9:16 MP4</span></div>
+      </div>
+      <div class="scene-list" id="scene-list"></div>
+    </section>
+  </main>
+
+  <footer><span>SCENE:60</span><p>Wan2.2 ZeroGPU · Story Engine · Windows TTS · FFmpeg</p></footer>
+  <script src="/static/app.js?v=5"></script>
+</body>
+</html>
