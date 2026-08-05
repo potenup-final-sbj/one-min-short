@@ -55,8 +55,6 @@ select { appearance: none; border-radius: 13px; padding: 14px 42px 14px 15px; ba
 .phone-shell { width: 248px; margin: 0 auto; padding: 8px; border: 1px solid #383a43; background: #08090d; border-radius: 31px; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
 .phone-screen { position:relative; aspect-ratio:9/16; overflow:hidden; border-radius:24px; background: radial-gradient(circle at 50% 30%,#26202a,#0b0c11 68%); }
 #player { display:block; width:100%;height:100%;object-fit:cover;background:#000; }
-.scene-preview { width:100%;height:100%;object-fit:cover;background:#000;animation:sceneFade .45s ease; }
-@keyframes sceneFade { from { opacity:.35;transform:scale(1.025) } to { opacity:1;transform:scale(1) } }
 .empty-preview { position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:25px; }
 .empty-preview strong {font:700 13px "Noto Sans KR";margin:18px 0 9px}.empty-preview p{font:10px/1.6 "Noto Sans KR";color:#777985;margin:0}
 .empty-orbit{width:72px;height:72px;border:1px solid rgba(255,255,255,.09);border-radius:50%;display:grid;place-items:center;position:relative}.empty-orbit::after{content:"";position:absolute;width:48px;height:48px;border:1px dashed rgba(255,63,113,.35);border-radius:50%}.empty-orbit span{color:var(--hot)}
