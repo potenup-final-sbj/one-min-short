@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <div class="grain"></div>
@@ -57,7 +57,7 @@
 
           <button class="generate-button" type="submit">
             <span class="button-icon">✦</span>
-            <span>60초 드라마 생성</span>
+            <span>대본 생성</span>
             <small>무료 · 로컬 렌더링</small>
           </button>
         </form>
@@ -81,6 +81,7 @@
         <div class="phone-shell">
           <div class="phone-screen" id="phone-screen">
             <video id="player" playsinline controls style="display:none"></video>
+            <img id="scene-preview" class="scene-preview hidden" alt="생성 중 장면 미리보기">
             <div class="empty-preview" id="empty-preview">
               <div class="empty-orbit"><span>✦</span></div>
               <strong>아직 만들어진 장면이 없어요</strong>
@@ -112,6 +113,6 @@
   </main>
 
   <footer><span>SCENE:60</span><p>Wan2.2 ZeroGPU · Story Engine · Windows TTS · FFmpeg</p></footer>
-  <script src="/static/app.js?v=5"></script>
+  <script src="/static/app.js?v=6"></script>
 </body>
 </html>

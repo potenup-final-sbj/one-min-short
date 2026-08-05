@@ -18,11 +18,13 @@ from huggingface_hub import get_token
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+ASSETS_DIR = BASE_DIR / "assets"
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="AI Short Drama Studio", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
 app.mount("/outputs", StaticFiles(directory=OUTPUT_DIR), name="outputs")
 
 renderer = VideoRenderer(BASE_DIR)

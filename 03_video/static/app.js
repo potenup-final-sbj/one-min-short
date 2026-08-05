@@ -2,6 +2,7 @@ const form = document.querySelector('#generate-form');
 const promptInput = document.querySelector('#prompt');
 const charCount = document.querySelector('#char-count');
 const player = document.querySelector('#player');
+const scenePreview = document.querySelector('#scene-preview');
 const emptyPreview = document.querySelector('#empty-preview');
 const choiceOverlay = document.querySelector('#choice-overlay');
 const progress = document.querySelector('#progress');
@@ -13,6 +14,12 @@ const resultSection = document.querySelector('#story-result');
 const previewActions = document.querySelector('#preview-actions');
 let generated = null;
 let progressTimer = null;
+let previewTimer = null;
+const demoScenes = [
+  '/assets/demo/scene-01-first-day.png',
+  '/assets/demo/scene-02-reveal.png',
+  '/assets/demo/scene-03-confrontation.png',
+];
 
 promptInput.addEventListener('input', () => {
   charCount.textContent = `${promptInput.value.length} / 300`;
@@ -28,7 +35,17 @@ function beginProgress() {
     [91, '두 개의 결말을 연결하고 있어요', 'Wan2.2 영상, 음성과 자막을 MP4로 마무리하는 중…'],
   ];
   let index = 0;
+  let sceneIndex = 0;
   progress.classList.remove('hidden');
+  emptyPreview.classList.add('hidden');
+  player.pause();
+  player.style.display = 'none';
+  scenePreview.classList.remove('hidden');
+  scenePreview.src = demoScenes[sceneIndex];
+  previewTimer = setInterval(() => {
+    sceneIndex = (sceneIndex + 1) % demoScenes.length;
+    scenePreview.src = `${demoScenes[sceneIndex]}?frame=${sceneIndex}`;
+  }, 2600);
   const update = () => {
     const [percent, title, detail] = phases[Math.min(index, phases.length - 1)];
     progressBar.style.width = `${percent}%`;
@@ -43,6 +60,7 @@ function beginProgress() {
 
 function finishProgress() {
   clearInterval(progressTimer);
+  clearInterval(previewTimer);
   progressBar.style.width = '100%';
   progressPercent.textContent = '100%';
   progressTitle.textContent = '드라마가 완성됐어요';
@@ -73,6 +91,7 @@ form.addEventListener('submit', async (event) => {
     finishProgress();
   } catch (error) {
     clearInterval(progressTimer);
+    clearInterval(previewTimer);
     progress.classList.remove('hidden');
     progressTitle.textContent = '생성하지 못했어요';
     progressDetail.textContent = error.message;
@@ -84,6 +103,7 @@ form.addEventListener('submit', async (event) => {
 
 function renderResult(data) {
   emptyPreview.classList.add('hidden');
+  scenePreview.classList.add('hidden');
   player.style.display = 'block';
   player.loop = false;
   player.muted = false;
