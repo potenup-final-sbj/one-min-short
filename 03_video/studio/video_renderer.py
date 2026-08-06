@@ -11,7 +11,12 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 from studio.scene_image_generator import SceneImageGenerator
-from studio.wan22_cloud import Wan22CloudClient, Wan22QuotaProtected
+from studio.video_provider import (
+    VIDEO_PROVIDER,
+    create_video_generator,
+    validate_video_provider,
+)
+from studio.wan22_cloud import Wan22QuotaProtected
 
 
 WIDTH = 720
@@ -87,11 +92,17 @@ class VideoRenderer:
         scenes_dir = project_dir / "scenes"
         audio_dir = project_dir / "audio"
         clips_dir = project_dir / "clips"
-        cloud_dir = project_dir / "wan22"
+        selected_provider = validate_video_provider(VIDEO_PROVIDER)
+        generated_video_dir = project_dir / selected_provider
         overlay_dir = project_dir / "overlays"
         generated_images_dir = project_dir / "generated_images"
         for directory in (
-            scenes_dir, audio_dir, clips_dir, cloud_dir, overlay_dir, generated_images_dir
+            scenes_dir,
+            audio_dir,
+            clips_dir,
+            generated_video_dir,
+            overlay_dir,
+            generated_images_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -105,76 +116,79 @@ class VideoRenderer:
         all_scenes = common_scenes + ending_a_scenes + ending_b_scenes
         for scene in all_scenes:
             scene["image_path"] = str(story_images[0])
-        wan_scene_ids = {
+        generated_scene_ids = {
             common_scenes[0]["id"],
             ending_a_scenes[-1]["id"],
             ending_b_scenes[-1]["id"],
         }
         clip_paths: dict[str, Path] = {}
-        cloud_client = Wan22CloudClient()
-        cloud_jobs: dict[str, dict] = {}
+        video_generator = create_video_generator(self.base_dir, selected_provider)
+        video_jobs: dict[str, dict] = {}
 
-        for index, scene in enumerate(all_scenes, start=1):
-            render_duration = scene["duration"]
-            image_path = scenes_dir / f"{scene['id']}.png"
-            text_path = audio_dir / f"{scene['id']}.txt"
-            audio_suffix = ".wav" if os.name == "nt" else ".mp3"
-            audio_path = audio_dir / f"{scene['id']}{audio_suffix}"
-            raw_video_path = cloud_dir / f"{scene['id']}.mp4"
-            overlay_path = overlay_dir / f"{scene['id']}.png"
-            clip_path = clips_dir / f"{scene['id']}.mp4"
+        try:
+            for index, scene in enumerate(all_scenes, start=1):
+                render_duration = scene["duration"]
+                image_path = scenes_dir / f"{scene['id']}.png"
+                text_path = audio_dir / f"{scene['id']}.txt"
+                audio_suffix = ".wav" if os.name == "nt" else ".mp3"
+                audio_path = audio_dir / f"{scene['id']}{audio_suffix}"
+                raw_video_path = generated_video_dir / f"{scene['id']}.mp4"
+                overlay_path = overlay_dir / f"{scene['id']}.png"
+                clip_path = clips_dir / f"{scene['id']}.mp4"
 
-            self._draw_scene(image_path, story, scene, index, len(all_scenes))
-            self._draw_subtitle_overlay(
-                overlay_path, story, scene, index, len(all_scenes)
-            )
-            text_path.write_text(scene["dialogue"], encoding="utf-8")
-            voice_style = next(
-                (
-                    str(character.get("voice", "female"))
-                    for character in story["characters"]
-                    if character.get("name") == scene["speaker"]
-                ),
-                "female",
-            )
-            self._synthesize(text_path, audio_path, scene["speaker"], voice_style)
-            if scene["id"] in wan_scene_ids:
-                input_image = self._input_image_for_scene(scene)
-                generation_prompt = self._generation_prompt(story, scene)
-                try:
-                    cloud_jobs[scene["id"]] = cloud_client.generate(
-                        input_image,
-                        generation_prompt,
-                        raw_video_path,
-                        seed=2100 + index,
-                    )
-                except Wan22QuotaProtected as exc:
-                    cloud_jobs[scene["id"]] = {
-                        "provider": "local animated generated image",
-                        "cached": True,
-                        "quota_fallback": True,
-                        "detail": str(exc),
-                    }
-                    self._render_clip(
-                        image_path, audio_path, clip_path, render_duration
-                    )
+                self._draw_scene(image_path, story, scene, index, len(all_scenes))
+                self._draw_subtitle_overlay(
+                    overlay_path, story, scene, index, len(all_scenes)
+                )
+                text_path.write_text(scene["dialogue"], encoding="utf-8")
+                voice_style = next(
+                    (
+                        str(character.get("voice", "female"))
+                        for character in story["characters"]
+                        if character.get("name") == scene["speaker"]
+                    ),
+                    "female",
+                )
+                self._synthesize(text_path, audio_path, scene["speaker"], voice_style)
+                if scene["id"] in generated_scene_ids:
+                    input_image = self._input_image_for_scene(scene)
+                    generation_prompt = self._generation_prompt(story, scene)
+                    try:
+                        video_jobs[scene["id"]] = video_generator.generate(
+                            input_image,
+                            generation_prompt,
+                            raw_video_path,
+                            seed=2100 + index,
+                        )
+                    except Wan22QuotaProtected as exc:
+                        video_jobs[scene["id"]] = {
+                            "provider": "local animated generated image",
+                            "cached": True,
+                            "quota_fallback": True,
+                            "detail": str(exc),
+                        }
+                        self._render_clip(
+                            image_path, audio_path, clip_path, render_duration
+                        )
+                    else:
+                        video_jobs[scene["id"]]["render_duration"] = render_duration
+                        self._render_generated_clip(
+                            raw_video_path,
+                            audio_path,
+                            overlay_path,
+                            clip_path,
+                            render_duration,
+                        )
                 else:
-                    cloud_jobs[scene["id"]]["render_duration"] = render_duration
-                    self._render_cloud_clip(
-                        raw_video_path,
-                        audio_path,
-                        overlay_path,
-                        clip_path,
-                        render_duration,
-                    )
-            else:
-                cloud_jobs[scene["id"]] = {
-                    "provider": "local animated still",
-                    "cached": True,
-                    "render_duration": render_duration,
-                }
-                self._render_clip(image_path, audio_path, clip_path, render_duration)
-            clip_paths[scene["id"]] = clip_path
+                    video_jobs[scene["id"]] = {
+                        "provider": "local animated still",
+                        "cached": True,
+                        "render_duration": render_duration,
+                    }
+                    self._render_clip(image_path, audio_path, clip_path, render_duration)
+                clip_paths[scene["id"]] = clip_path
+        finally:
+            video_generator.close()
 
         common = project_dir / "common.mp4"
         ending_a = project_dir / "ending_a.mp4"
@@ -191,8 +205,8 @@ class VideoRenderer:
         (project_dir / "story.json").write_text(
             json.dumps(story, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        (project_dir / "wan22_jobs.json").write_text(
-            json.dumps(cloud_jobs, ensure_ascii=False, indent=2), encoding="utf-8"
+        (project_dir / f"{selected_provider}_jobs.json").write_text(
+            json.dumps(video_jobs, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         manifest = {
             "poster": "scenes/common_01.png",
@@ -388,7 +402,7 @@ class VideoRenderer:
         ]
         self._run(command)
 
-    def _render_cloud_clip(
+    def _render_generated_clip(
         self,
         video: Path,
         audio: Path,
