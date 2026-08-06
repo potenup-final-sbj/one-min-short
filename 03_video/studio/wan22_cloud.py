@@ -26,6 +26,9 @@ class Wan22QuotaProtected(RuntimeError):
 class Wan22CloudClient:
     """Free Hugging Face ZeroGPU client for Wan2.2 Image-to-Video."""
 
+    provider_name = "Hugging Face ZeroGPU Wan2.2"
+    artifact_name = "wan22"
+
     def __init__(self, log: Callable[[str], None] | None = None):
         token = get_token()
         if not token:
@@ -143,3 +146,6 @@ class Wan22CloudClient:
             "cached": False,
             "quota_fallback": False,
         }
+
+    def close(self) -> None:
+        """Match the local provider lifecycle interface."""

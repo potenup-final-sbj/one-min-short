@@ -10,7 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from huggingface_hub import get_token
 from pydantic import BaseModel, Field
 
+from studio.ltx_local import LTX_VIDEO_MODEL, LtxLocalClient
 from studio.story_engine import OLLAMA_URL, STORY_MODEL, create_story
+from studio.video_provider import VIDEO_PROVIDER, validate_video_provider
 from studio.video_renderer import VideoRenderer
 from studio.wan22_cloud import WAN22_SPACE
 
@@ -41,16 +43,32 @@ def index() -> FileResponse:
 
 @app.get("/api/health")
 def health() -> dict:
-    return {
+    selected_provider = validate_video_provider(VIDEO_PROVIDER)
+    result: dict[str, object] = {
         "status": "ok",
         "ffmpeg": str(renderer.ffmpeg),
         "tts": "Windows SAPI",
-        "video_provider": f"Hugging Face ZeroGPU: {WAN22_SPACE}",
         "story_provider": f"Local Ollama: {STORY_MODEL} ({OLLAMA_URL})",
         "image_provider": "Local ByteDance SDXL-Lightning 4-step",
-        "wan22_configured": bool(get_token()),
-        "billing": "free daily quota",
+        "video_provider_key": selected_provider,
     }
+    if selected_provider == "ltx":
+        result.update(
+            {
+                "video_provider": f"Local LTX Image-to-Video: {LTX_VIDEO_MODEL}",
+                "ltx_cuda_available": LtxLocalClient.is_available(),
+                "billing": "local inference",
+            }
+        )
+    else:
+        result.update(
+            {
+                "video_provider": f"Hugging Face ZeroGPU: {WAN22_SPACE}",
+                "wan22_configured": bool(get_token()),
+                "billing": "free daily quota",
+            }
+        )
+    return result
 
 
 @app.post("/api/generate")
