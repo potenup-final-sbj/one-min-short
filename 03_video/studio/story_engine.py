@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
+import os
 from pathlib import Path
 
-from huggingface_hub import InferenceClient, get_token
+import httpx
 
 
-STORY_MODEL = "openai/gpt-oss-20b"
-STORY_PROMPT_VERSION = "thirty-second-v1"
+STORY_MODEL = os.getenv("OLLAMA_STORY_MODEL", "qwen3:4b")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
+STORY_PROMPT_VERSION = "local-qwen-thirty-second-v1"
 ACCENTS = {
     "로맨스": "#ff4d8d",
     "스릴러": "#8b5cf6",
@@ -22,27 +23,71 @@ class StoryGenerationError(RuntimeError):
     pass
 
 
-def _extract_json(value: str) -> dict:
-    text = value.strip()
-    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
-    if fenced:
-        text = fenced.group(1)
-    else:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            text = text[start : end + 1]
-    try:
-        result = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise StoryGenerationError(f"스토리 JSON을 해석하지 못했습니다: {exc}") from exc
-    if not isinstance(result, dict):
-        raise StoryGenerationError("스토리 생성 결과가 JSON 객체가 아닙니다.")
-    return result
+SCENE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "location": {"type": "string"},
+        "speaker": {"type": "string"},
+        "dialogue": {"type": "string"},
+        "visual_prompt": {"type": "string"},
+        "motion_prompt": {"type": "string"},
+    },
+    "required": [
+        "title", "location", "speaker", "dialogue",
+        "visual_prompt", "motion_prompt",
+    ],
+    "additionalProperties": False,
+}
+
+STORY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "logline": {"type": "string"},
+        "visual_bible": {"type": "string"},
+        "hero_visual_prompt": {"type": "string"},
+        "characters": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "role": {"type": "string"},
+                    "voice": {"type": "string", "enum": ["female", "male"]},
+                },
+                "required": ["name", "role", "voice"],
+                "additionalProperties": False,
+            },
+        },
+        "common_scenes": {
+            "type": "array", "minItems": 3, "maxItems": 3,
+            "items": SCENE_SCHEMA,
+        },
+        "ending_a": {
+            "type": "array", "minItems": 1, "maxItems": 1,
+            "items": SCENE_SCHEMA,
+        },
+        "ending_b": {
+            "type": "array", "minItems": 1, "maxItems": 1,
+            "items": SCENE_SCHEMA,
+        },
+    },
+    "required": [
+        "title", "logline", "visual_bible", "hero_visual_prompt", "characters",
+        "common_scenes", "ending_a", "ending_b",
+    ],
+    "additionalProperties": False,
+}
 
 
 def _validate_scenes(story: dict, accent: str) -> dict:
-    groups = (("common_scenes", "common", 3, 6), ("ending_a", "ending_a", 1, 12), ("ending_b", "ending_b", 1, 12))
+    groups = (
+        ("common_scenes", "common", 3, 6),
+        ("ending_a", "ending_a", 1, 12),
+        ("ending_b", "ending_b", 1, 12),
+    )
     required = {
         "title", "location", "speaker", "dialogue", "visual_prompt", "motion_prompt"
     }
@@ -62,18 +107,13 @@ def _validate_scenes(story: dict, accent: str) -> dict:
             scene["accent"] = accent
     if not isinstance(story.get("characters"), list) or not story["characters"]:
         raise StoryGenerationError("등장인물 정보가 없습니다.")
-    if not isinstance(story.get("visual_bible"), str) or not story["visual_bible"].strip():
-        raise StoryGenerationError("캐릭터·배경 비주얼 바이블이 없습니다.")
+    for field in ("visual_bible", "hero_visual_prompt"):
+        if not isinstance(story.get(field), str) or not story[field].strip():
+            raise StoryGenerationError(f"{field}가 비어 있습니다.")
     return story
 
 
 def create_story(prompt: str, genre: str, mood: str) -> dict:
-    token = get_token()
-    if not token:
-        raise StoryGenerationError(
-            "Hugging Face 로그인이 필요합니다. `hf auth login`을 먼저 실행하세요."
-        )
-
     cache_dir = Path(__file__).resolve().parents[1] / "outputs" / "story_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_key = hashlib.sha256(
@@ -83,79 +123,58 @@ def create_story(prompt: str, genre: str, mood: str) -> dict:
     if cache_path.is_file():
         return json.loads(cache_path.read_text(encoding="utf-8"))
 
-    schema = {
-        "title": "Korean title, no more than 28 characters",
-        "logline": "the exact user premise in Korean",
-        "visual_bible": "English description of recurring characters, wardrobe, era, and setting for image consistency",
-        "characters": [
-            {"name": "Korean name", "role": "Korean role", "voice": "female or male"}
-        ],
-        "common_scenes": [
-            {
-                "title": "Korean scene title",
-                "location": "Korean location",
-                "speaker": "character name or 내레이션",
-                "dialogue": "natural Korean narration or dialogue",
-                "visual_prompt": "English cinematic still description grounded in the user premise",
-                "motion_prompt": "English I2V character action and camera direction",
-            }
-        ],
-        "ending_a": "same scene object format, exactly 1 scene",
-        "ending_b": "same scene object format, exactly 1 scene",
-    }
     instruction = f"""
-Create a complete 30-second Korean vertical short-drama storyboard from the user's premise.
+Create a complete 30-second Korean vertical short-drama storyboard.
 
 USER PREMISE: {prompt}
 GENRE: {genre}
 MOOD: {mood}
 
-Return only one valid JSON object matching this shape:
-{json.dumps(schema, ensure_ascii=False, indent=2)}
-
 Rules:
-- Write exactly 3 common_scenes scenes, exactly 1 ending_a scene, and exactly 1 ending_b scene.
-- The three common scenes last 6 seconds each. Each alternative ending lasts 12 seconds.
-- Every character, location, event, line, visual_prompt, and motion_prompt must derive from USER PREMISE.
-- Do not introduce offices, company CEOs, former lovers, or an eight-year separation unless USER PREMISE explicitly asks for them.
-- Keep the same protagonist appearance and wardrobe across all English visual prompts by following visual_bible.
-- visual_prompt must describe the exact visible setting, characters, wardrobe, composition, lighting, and emotion.
-- motion_prompt must describe actions visible from the still plus restrained camera movement suitable for image-to-video.
-- Korean dialogue must be concise enough to speak within each scene.
-- ending_a and ending_b must be meaningfully different choices.
-- Do not include IDs, phase, duration, subtitle, or accent; the application adds them.
+- Write exactly 3 common scenes and exactly one scene for each A/B ending.
+- Every character, location, event, and line must derive from USER PREMISE.
+- Korean dialogue must fit naturally within each scene.
+- visual_bible must describe recurring characters, wardrobe, era, and setting in English.
+- hero_visual_prompt must be one detailed English image prompt representing the WHOLE premise.
+- hero_visual_prompt must include every essential subject, animal, object, relationship, and location
+  from USER PREMISE even if it appears later in the story.
+- Each visual_prompt and motion_prompt must be in English.
+- Do not introduce an office, CEO, former lover, or unrelated stock setting unless requested.
+- Make ending A and ending B meaningfully different.
 """.strip()
 
-    client = InferenceClient(provider="auto", api_key=token, timeout=180)
+    payload = {
+        "model": STORY_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a Korean screenwriter and storyboard director. "
+                    "Return only data matching the supplied JSON schema."
+                ),
+            },
+            {"role": "user", "content": instruction},
+        ],
+        "stream": False,
+        "think": False,
+        "format": STORY_SCHEMA,
+        "keep_alive": 0,
+        "options": {"temperature": 0.4},
+    }
     try:
-        response = client.chat_completion(
-            model=STORY_MODEL,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a Korean screenwriter and storyboard director. "
-                        "Follow the requested JSON format exactly."
-                    ),
-                },
-                {"role": "user", "content": instruction},
-            ],
-            max_tokens=5000,
-            temperature=0.45,
-        )
-        content = response.choices[0].message.content or ""
-    except Exception as exc:
-        raise StoryGenerationError(f"대본 생성 API 호출에 실패했습니다: {exc}") from exc
-    if not content.strip():
-        raise StoryGenerationError("대본 생성 결과가 비어 있습니다.")
+        response = httpx.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=180)
+        response.raise_for_status()
+        content = response.json()["message"]["content"]
+        story = json.loads(content)
+    except (httpx.HTTPError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise StoryGenerationError(
+            f"로컬 Ollama 대본 생성에 실패했습니다. Ollama와 {STORY_MODEL} 모델을 확인하세요: {exc}"
+        ) from exc
 
-    story = _extract_json(content)
     story["logline"] = prompt
     story["genre"] = genre
     story["mood"] = mood
     story["duration"] = {"common": 18, "ending": 12, "total": 30}
     story = _validate_scenes(story, ACCENTS.get(genre, "#ff4d8d"))
-    cache_path.write_text(
-        json.dumps(story, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    cache_path.write_text(json.dumps(story, ensure_ascii=False, indent=2), encoding="utf-8")
     return story

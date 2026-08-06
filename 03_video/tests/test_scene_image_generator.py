@@ -5,31 +5,29 @@ def _story(logline: str) -> dict:
     return {
         "logline": logline,
         "visual_bible": "Two astronauts in spacesuits inside a spacecraft.",
+        "hero_visual_prompt": "Two astronauts beside a rocket at dusk.",
         "genre": "romance",
         "mood": "tense",
     }
 
 
-def test_user_premise_and_exact_scene_are_present() -> None:
+def test_user_premise_and_hero_visual_are_present() -> None:
     story = _story("우주비행사들의 연애")
-    scene = {"visual_prompt": "Two astronauts beside a rocket at dusk."}
 
-    prompt = SceneImageGenerator._prompt(story, scene, 1)
+    prompt = SceneImageGenerator._prompt(story)
 
     assert story["logline"] in prompt
-    assert scene["visual_prompt"] in prompt
-    assert "location must match" in prompt
+    assert story["hero_visual_prompt"] in prompt
+    assert "every essential subject" in prompt
 
 
 def test_office_is_not_globally_forbidden() -> None:
     story = _story("서울 사무실에서 벌어지는 미스터리")
-    scene = {"visual_prompt": "A detective searches a dark office."}
+    story["hero_visual_prompt"] = "A detective searches a dark office."
 
-    prompt = SceneImageGenerator._prompt(story, scene, 1)
-    negative = SceneImageGenerator._negative_prompt()
+    prompt = SceneImageGenerator._prompt(story)
 
     assert "office" in prompt
-    assert "corporate interior" not in negative
 
 
 def test_story_generates_only_one_image(tmp_path) -> None:
@@ -54,20 +52,21 @@ def test_story_generates_only_one_image(tmp_path) -> None:
         def save(self, path, format):
             path.write_bytes(format.encode("ascii"))
 
-    class FakeClient:
+    class FakePipeline:
         def __init__(self):
             self.prompts = []
 
-        def text_to_image(self, prompt, **_kwargs):
+        def __call__(self, prompt, **_kwargs):
             self.prompts.append(prompt)
-            return FakeImage()
+            return type("Result", (), {"images": [FakeImage()]})()
 
-    generator.client = FakeClient()
+    pipeline = FakePipeline()
+    generator._load_pipeline = lambda: pipeline
     outputs = generator.generate(story, tmp_path / "output")
 
     assert len(outputs) == 1
-    assert len(generator.client.prompts) == 1
-    assert "Shot 1:" in generator.client.prompts[0]
+    assert len(pipeline.prompts) == 1
+    assert story["hero_visual_prompt"] in pipeline.prompts[0]
     assert outputs[0].name == "story_01.png"
 
 
@@ -84,17 +83,18 @@ def test_image_is_generated_fresh_on_every_request(tmp_path) -> None:
         def save(self, path, format):
             path.write_bytes(format.encode("ascii"))
 
-    class FakeClient:
+    class FakePipeline:
         def __init__(self):
             self.calls = 0
 
-        def text_to_image(self, _prompt, **_kwargs):
+        def __call__(self, _prompt, **_kwargs):
             self.calls += 1
-            return FakeImage()
+            return type("Result", (), {"images": [FakeImage()]})()
 
     generator = object.__new__(SceneImageGenerator)
-    generator.client = FakeClient()
+    pipeline = FakePipeline()
+    generator._load_pipeline = lambda: pipeline
     generator.generate(story, tmp_path / "first")
     generator.generate(story, tmp_path / "second")
 
-    assert generator.client.calls == 2
+    assert pipeline.calls == 2
