@@ -2,15 +2,29 @@
 name = "ai-short-drama-studio"
 version = "0.1.0"
 description = "Prompt-to-video vertical short drama studio"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
+    "accelerate>=1.10.0",
+    "diffusers>=0.35.0",
     "edge-tts>=7.2.0",
     "fastapi>=0.115.0",
     "gradio-client>=2.0.0",
     "huggingface-hub>=0.34.0",
+    "httpx>=0.28.0",
     "pillow>=11.0.0",
+    "safetensors>=0.6.0",
+    "torch>=2.7.0",
+    "transformers>=4.55.0",
     "uvicorn[standard]>=0.34.0",
 ]
 
 [tool.uv]
 package = false
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }

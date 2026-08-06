@@ -1,19 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from huggingface_hub import get_token
 from pydantic import BaseModel, Field
 
-from studio.story_engine import create_story
+from studio.story_engine import OLLAMA_URL, STORY_MODEL, create_story
 from studio.video_renderer import VideoRenderer
 from studio.wan22_cloud import WAN22_SPACE
-from huggingface_hub import get_token
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -47,7 +46,8 @@ def health() -> dict:
         "ffmpeg": str(renderer.ffmpeg),
         "tts": "Windows SAPI",
         "video_provider": f"Hugging Face ZeroGPU: {WAN22_SPACE}",
-        "image_provider": "Hugging Face Inference Providers: FLUX.1-schnell",
+        "story_provider": f"Local Ollama: {STORY_MODEL} ({OLLAMA_URL})",
+        "image_provider": "Local ByteDance SDXL-Lightning 4-step",
         "wan22_configured": bool(get_token()),
         "billing": "free daily quota",
     }
