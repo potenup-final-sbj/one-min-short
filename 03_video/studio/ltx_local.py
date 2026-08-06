@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import gc
 import hashlib
+import logging
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Callable
 
+
+logger = logging.getLogger("uvicorn.error").getChild(__name__)
 
 LTX_VIDEO_MODEL = os.getenv("LTX_VIDEO_MODEL", "Lightricks/LTX-Video-0.9.5")
 LTX_WIDTH = 288
@@ -40,6 +44,10 @@ class LtxLocalClient:
         self.log = log or (lambda _message: None)
         self._pipeline = None
 
+    def _log_info(self, message: str) -> None:
+        logger.info(message)
+        self.log(message)
+
     @staticmethod
     def is_available() -> bool:
         try:
@@ -47,6 +55,7 @@ class LtxLocalClient:
 
             return torch.cuda.is_available()
         except ImportError:
+            logger.warning("LTX CUDA 상태를 확인할 수 없습니다: torch가 설치되지 않았습니다.")
             return False
 
     def _load_pipeline(self):
@@ -56,17 +65,20 @@ class LtxLocalClient:
             import torch
             from diffusers import LTXImageToVideoPipeline
         except ImportError as exc:
+            logger.exception("LTX 파이프라인 의존성을 불러오지 못했습니다.")
             raise LtxConfigurationError(
                 "로컬 LTX 의존성이 없습니다. torch, diffusers, transformers, "
                 "accelerate, imageio, sentencepiece를 설치하세요."
             ) from exc
 
         if not torch.cuda.is_available():
+            logger.error("LTX 모델을 로드할 수 없습니다: CUDA GPU를 사용할 수 없습니다.")
             raise LtxConfigurationError(
                 "로컬 LTX 영상 생성에는 CUDA를 지원하는 NVIDIA GPU가 필요합니다."
             )
 
-        self.log(f"로컬 LTX 모델 로드: {LTX_VIDEO_MODEL}")
+        started_at = time.perf_counter()
+        self._log_info(f"로컬 LTX 모델 로드 시작: {LTX_VIDEO_MODEL}")
         pipeline = LTXImageToVideoPipeline.from_pretrained(
             LTX_VIDEO_MODEL,
             torch_dtype=torch.bfloat16,
@@ -74,6 +86,10 @@ class LtxLocalClient:
         pipeline.enable_model_cpu_offload()
         pipeline.vae.enable_tiling()
         self._pipeline = pipeline
+        self._log_info(
+            f"로컬 LTX 모델 로드 완료: model={LTX_VIDEO_MODEL}, "
+            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        )
         return pipeline
 
     @staticmethod
@@ -100,13 +116,16 @@ class LtxLocalClient:
         seed: int,
     ) -> dict:
         if not image_path.is_file():
+            logger.error("LTX 입력 이미지를 찾을 수 없습니다: %s", image_path)
             raise FileNotFoundError(f"LTX 입력 이미지를 찾을 수 없습니다: {image_path}")
 
         cache_path = self.cache_dir / f"{self._cache_key(image_path, motion_prompt, seed)}.mp4"
         if cache_path.is_file():
             output_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(cache_path, output_path)
-            self.log(f"LTX 캐시 사용: {cache_path.name}")
+            self._log_info(
+                f"LTX 캐시 사용: cache={cache_path.name}, output={output_path.name}, seed={seed}"
+            )
             return {
                 "provider": self.provider_name,
                 "model": LTX_VIDEO_MODEL,
@@ -120,9 +139,13 @@ class LtxLocalClient:
             import torch
             from diffusers.utils import export_to_video, load_image
 
+            started_at = time.perf_counter()
             pipeline = self._load_pipeline()
             generator = torch.Generator(device="cuda").manual_seed(seed)
-            self.log(f"로컬 LTX 영상 생성: {image_path.name}")
+            self._log_info(
+                f"로컬 LTX 영상 생성 시작: input={image_path.name}, "
+                f"output={output_path.name}, seed={seed}"
+            )
             frames = pipeline(
                 image=load_image(str(image_path)),
                 prompt=motion_prompt,
@@ -142,11 +165,23 @@ class LtxLocalClient:
         except LtxConfigurationError:
             raise
         except Exception as exc:
+            logger.exception(
+                "로컬 LTX 영상 생성 실패: input=%s, output=%s, seed=%s",
+                image_path.name,
+                output_path.name,
+                seed,
+            )
             raise RuntimeError(f"로컬 LTX 영상 생성에 실패했습니다: {exc}") from exc
 
         if not output_path.is_file():
+            logger.error("LTX 출력 MP4가 생성되지 않았습니다: %s", output_path)
             raise RuntimeError(f"로컬 LTX가 유효한 MP4를 생성하지 않았습니다: {output_path}")
         shutil.copy2(output_path, cache_path)
+        self._log_info(
+            f"로컬 LTX 영상 생성 완료: output={output_path.name}, "
+            f"size={output_path.stat().st_size}, seed={seed}, "
+            f"elapsed={time.perf_counter() - started_at:.2f}s"
+        )
         return {
             "provider": self.provider_name,
             "model": LTX_VIDEO_MODEL,
@@ -157,6 +192,7 @@ class LtxLocalClient:
         }
 
     def close(self) -> None:
+        had_pipeline = self._pipeline is not None
         if self._pipeline is not None:
             del self._pipeline
             self._pipeline = None
@@ -167,4 +203,6 @@ class LtxLocalClient:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
-            pass
+            logger.warning("LTX 메모리 정리 중 torch를 불러오지 못했습니다.")
+        if had_pipeline:
+            self._log_info("로컬 LTX 파이프라인 메모리 정리 완료")

@@ -11,16 +11,18 @@ def test_default_provider_is_ltx() -> None:
     assert video_provider.VIDEO_PROVIDER == "ltx"
 
 
-def test_ltx_provider_does_not_create_wan_client(monkeypatch, tmp_path: Path) -> None:
+def test_ltx_provider_does_not_create_wan_client(caplog, monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         video_provider,
         "Wan22CloudClient",
         lambda: (_ for _ in ()).throw(AssertionError("Wan2.2 initialized")),
     )
 
-    client = video_provider.create_video_generator(tmp_path, "ltx")
+    with caplog.at_level("INFO", logger="uvicorn.error.studio.video_provider"):
+        client = video_provider.create_video_generator(tmp_path, "ltx")
 
     assert isinstance(client, LtxLocalClient)
+    assert "영상 공급자 선택: provider=ltx" in caplog.text
 
 
 def test_wan22_provider_is_selected(monkeypatch, tmp_path: Path) -> None:

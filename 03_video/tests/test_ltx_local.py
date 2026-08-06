@@ -13,7 +13,7 @@ def test_cache_key_changes_with_seed(tmp_path: Path) -> None:
     assert first != second
 
 
-def test_cached_video_is_reused_without_loading_pipeline(tmp_path: Path) -> None:
+def test_cached_video_is_reused_without_loading_pipeline(caplog, tmp_path: Path) -> None:
     image = tmp_path / "input.png"
     image.write_bytes(b"image")
     client = LtxLocalClient(tmp_path)
@@ -22,11 +22,14 @@ def test_cached_video_is_reused_without_loading_pipeline(tmp_path: Path) -> None
     client._load_pipeline = lambda: (_ for _ in ()).throw(AssertionError("loaded"))
     output = tmp_path / "result" / "clip.mp4"
 
-    result = client.generate(image, "move", output, seed=42)
+    with caplog.at_level("INFO", logger="uvicorn.error.studio.ltx_local"):
+        result = client.generate(image, "move", output, seed=42)
 
     assert output.read_bytes() == b"video"
     assert result["cached"] is True
     assert result["provider"] == client.provider_name
+    assert "LTX 캐시 사용" in caplog.text
+    assert "move" not in caplog.text
 
 
 def test_close_releases_loaded_pipeline(monkeypatch, tmp_path: Path) -> None:
