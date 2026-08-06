@@ -5,6 +5,7 @@ description = "Prompt-to-video vertical short drama studio"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "accelerate>=1.10.0",
+    "bitsandbytes>=0.49.0",
     "diffusers>=0.35.0",
     "edge-tts>=7.2.0",
     "fastapi>=0.115.0",

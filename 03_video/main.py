@@ -11,7 +11,7 @@ from huggingface_hub import get_token
 from pydantic import BaseModel, Field
 
 from studio.ltx_local import LTX_VIDEO_MODEL, LtxLocalClient
-from studio.story_engine import OLLAMA_URL, STORY_MODEL, create_story
+from studio.story_engine import STORY_MODEL, create_story
 from studio.video_provider import VIDEO_PROVIDER, validate_video_provider
 from studio.video_renderer import VideoRenderer
 from studio.wan22_cloud import WAN22_SPACE
@@ -48,7 +48,8 @@ def health() -> dict:
         "status": "ok",
         "ffmpeg": str(renderer.ffmpeg),
         "tts": "Windows SAPI",
-        "story_provider": f"Local Ollama: {STORY_MODEL} ({OLLAMA_URL})",
+        "video_provider": f"Hugging Face ZeroGPU: {WAN22_SPACE}",
+        "story_provider": f"Local Hugging Face Transformers: {STORY_MODEL} (4bit NF4)",
         "image_provider": "Local ByteDance SDXL-Lightning 4-step",
         "video_provider_key": selected_provider,
     }
