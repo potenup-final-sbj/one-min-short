@@ -1,0 +1,5 @@
+# Keep non-hackathon projects local while publishing only 03_video.
+/00_img/
+/01_hugging-face/
+/02_inference/
+/03_model-serving/
